@@ -28,8 +28,8 @@ type rcuShard[K comparable, V any] struct {
 }
 
 func NewRCUMap[K comparable, V any]() RCUMap[K, V] {
-	cap := 10
-	shards := make([]*rcuShard[K, V], 0, 10)
+	cap := 64
+	shards := make([]*rcuShard[K, V], 0, cap)
 	for range cap {
 		m := map[K]V{}
 		r := rcuShard[K, V]{}
@@ -54,11 +54,13 @@ func (m *rcuMap[K, V]) Set(key K, value V) {
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 	oldMap := *shard.holder.Load()
-	newMap := make(map[K]V, len(oldMap))
+	newMap := make(map[K]V, len(oldMap)+1)
 	maps.Copy(newMap, oldMap)
 	newMap[key] = value
 	shard.holder.Store(&newMap)
-	atomic.AddInt32(&m.len, 1)
+	if _, ok := oldMap[key]; !ok {
+		atomic.AddInt32(&m.len, 1)
+	}
 }
 
 func (m *rcuMap[K, V]) Get(key K) (V, bool) {
@@ -75,6 +77,9 @@ func (m *rcuMap[K, V]) Del(key K) {
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 	oldMap := *shard.holder.Load()
+	if _, ok := oldMap[key]; !ok {
+		return
+	}
 	newMap := make(map[K]V, len(oldMap))
 	maps.Copy(newMap, oldMap)
 	delete(newMap, key)
